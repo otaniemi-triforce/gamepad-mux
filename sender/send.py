@@ -3,7 +3,9 @@
 from inputs import devices, get_gamepad
 import socket
 import time
+import queue
 import sys
+import threading
 
 
 hosts = sys.argv[1:]
@@ -24,9 +26,6 @@ for host in hosts:
     socks.append(sock)
 print("Sending keys to the following endpoints:", ", ".join(hosts))
 
-for device in devices.gamepads:
-    print(device)
-
 gamepad_state = {
     "X": 0, # D-pad X axis
     "Y": 0, # D-pad Y axis
@@ -38,9 +37,30 @@ gamepad_state = {
 gamepad_state_changed = False
 gamepad_last_update_sent = time.clock()
 
+
+class GamepadReader(threading.Thread):
+
+    def __init__(self, events, gamepad):
+        super().__init__()
+        self.__events = events
+        self.__id, self.__gamepad = gamepad
+
+    def run(self):
+        while True:
+            event = self.__gamepad.read()
+            self.__events.put((self.__id, event))
+
+
+event_queue = queue.Queue()
+for gamepad in enumerate(devices.gamepads):
+    gamepad_id, gamepad_device = gamepad
+    print(f"{gamepad_id}. {gamepad_device}")
+    GamepadReader(event_queue, gamepad).start()
+
+
 while True:
     try:
-        events = get_gamepad(timeout=0.1)
+        gid, events = event_queue.get()
     except KeyboardInterrupt:
         print()  # newline
         sys.exit(0)
@@ -49,6 +69,7 @@ while True:
         sys.exit(1)
 
     for event in events:
+        print(gid, event.code, event.state)
         if event.code.startswith("ABS_HAT0"):
             axis, direction = event.code[8], event.state
             gamepad_state[axis] = int(direction)
