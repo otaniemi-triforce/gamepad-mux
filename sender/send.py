@@ -26,18 +26,6 @@ for host in hosts:
     socks.append(sock)
 print("Sending keys to the following endpoints:", ", ".join(hosts))
 
-gamepad_state = {
-    "X": 0, # D-pad X axis
-    "Y": 0, # D-pad Y axis
-    "S": 0, # A
-    "E": 0, # B
-    "N": 0, # X, west is down for some reason
-    "W": 0, # Y, likewise, east is up
-}
-gamepad_state_changed = False
-gamepad_last_update_sent = time.clock()
-
-
 class GamepadReader(threading.Thread):
 
     def __init__(self, events, gamepad):
@@ -50,10 +38,20 @@ class GamepadReader(threading.Thread):
             event = self.__gamepad.read()
             self.__events.put((self.__id, event))
 
+game_state = []
+game_state_changed = False
 
 event_queue = queue.Queue()
 for gamepad in enumerate(devices.gamepads):
     gamepad_id, gamepad_device = gamepad
+    game_state.append({
+        "X": 0,
+        "Y": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+    })
     print(f"{gamepad_id}. {gamepad_device}")
     GamepadReader(event_queue, gamepad).start()
 
@@ -69,49 +67,73 @@ while True:
         sys.exit(1)
 
     for event in events:
-        print(gid, event.code, event.state)
-        if event.code.startswith("ABS_HAT0"):
-            axis, direction = event.code[8], event.state
-            gamepad_state[axis] = int(direction)
-            gamepad_state_changed = True
-        elif event.code.startswith("BTN_"):
-            button, state = event.code[4], event.state
-            print(button, state)
-            gamepad_state[button] = int(state)
-            gamepad_state_changed = True        
-        # else:
-        #     print(event.code, event.state)
+        # print(gid, event.code, event.state)
+        game_state_changed = True
+        # PS1/2 gamepad with usb adapter
+        if event.code == "ABS_X":
+            if event.state < 127:
+                game_state[gid]["X"] = -1
+            elif event.state > 128:
+                game_state[gid]["X"] = 1
+            else:
+                game_state[gid]["X"] = 0
+        elif event.code == "ABS_Y":
+            if event.state < 127:
+                game_state[gid]["Y"] = -1
+            elif event.state > 128:
+                game_state[gid]["Y"] = 1
+            else:
+                game_state[gid]["Y"] = 0
+        elif event.code == "BTN_TOP":
+            game_state[gid]["1"] = event.state
+        elif event.code == "BTN_THUMB2":
+            game_state[gid]["2"] = event.state
+        elif event.code == "BTN_THUMB":
+            game_state[gid]["3"] = event.state
+        elif event.code == "BTN_BASE3":
+            game_state[gid]["4"] = event.state
 
-    now = time.clock()
+        # X360 USB
+        # elif event.code.startswith("ABS_HAT0"):
+        #     axis, direction = event.code[8], event.state
+        #     game_state[gid][axis] = int(direction)
+        # elif event.code.startswith("BTN_"):
+        #     button, state = event.code[4], event.state
+        #     print(button, state)
+        #     game_state[gid][button] = int(state)
+       
+        else:
+            game_state_changed = False
 
-    if gamepad_state_changed or now > gamepad_last_update_sent + 1:
-        key_vector = list("00000000")
-        #                  UDLRABCD
-        if gamepad_state["Y"] == -1:
-            key_vector[0] = "1"
-        if gamepad_state["Y"] == 1:
-            key_vector[1] = "1"
-        if gamepad_state["X"] == -1:
-            key_vector[2] = "1"
-        if gamepad_state["X"] == 1:
-            key_vector[3] = "1"
-        if gamepad_state["S"] == 1:
-            key_vector[4] = "1"
-        if gamepad_state["E"] == 1:
-            key_vector[5] = "1"
-        if gamepad_state["N"] == 1:
-            key_vector[6] = "1"
-        if gamepad_state["W"] == 1:
-            key_vector[7] = "1"
-
-        gamepad_state_payload = "".join(key_vector).encode("ascii")
+    if game_state_changed:
+        game_state_payload = ""
+        for controller in game_state:
+            key_vector = list("00000000")
+            #                  UDLRABCD
+            if controller["Y"] < 0:
+                key_vector[0] = "1"
+            if controller["Y"] > 0:
+                key_vector[1] = "1"
+            if controller["X"] < 0:
+                key_vector[2] = "1"
+            if controller["X"] > 0:
+                key_vector[3] = "1"
+            if controller["1"] == 1:
+                key_vector[4] = "1"
+            if controller["2"] == 1:
+                key_vector[5] = "1"
+            if controller["3"] == 1:
+                key_vector[6] = "1"
+            if controller["4"] == 1:
+                key_vector[7] = "1"
+            game_state_payload += "".join(key_vector)
         try:
-            print(gamepad_state_payload)
+            encoded_payload = game_state_payload.encode("ascii")
+            print(game_state_payload)
             for sock in socks:
-                sock.send(gamepad_state_payload)
+                sock.send(encoded_payload)
         except ConnectionRefusedError:
             # Keep retrying
             pass
 
-        gamepad_state_changed = False
-        gamepad_last_update_sent = now
+        game_state_changed = False
