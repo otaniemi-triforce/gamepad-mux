@@ -26,6 +26,7 @@ for host in hosts:
     socks.append(sock)
 print("Sending keys to the following endpoints:", ", ".join(hosts))
 
+
 class GamepadReader(threading.Thread):
 
     def __init__(self, events, gamepad):
@@ -35,8 +36,13 @@ class GamepadReader(threading.Thread):
 
     def run(self):
         while True:
-            event = self.__gamepad.read()
+            try:
+                event = self.__gamepad.read()
+            except OSError:
+                print("Gamepad removed, exiting.")
+                sys.exit(1)
             self.__events.put((self.__id, event))
+
 
 game_state = []
 game_state_changed = False
@@ -60,14 +66,9 @@ while True:
     try:
         gid, events = event_queue.get()
     except KeyboardInterrupt:
-        print()  # newline
         sys.exit(0)
-    except OSError:
-        print("Gamepad removed. Thank you for flying with Triforce Airlines.")
-        sys.exit(1)
 
     for event in events:
-        # print(gid, event.code, event.state)
         game_state_changed = True
         # PS1/2 gamepad with usb adapter
         if event.code == "ABS_X":
@@ -103,6 +104,7 @@ while True:
         #     game_state[gid][button] = int(state)
        
         else:
+            # print(gid, event.code, event.state)
             game_state_changed = False
 
     if game_state_changed:
@@ -129,7 +131,8 @@ while True:
             game_state_payload += "".join(key_vector)
         try:
             encoded_payload = game_state_payload.encode("ascii")
-            print(game_state_payload)
+
+            # TODO: Add multicast / broadcast support
             for sock in socks:
                 sock.send(encoded_payload)
         except ConnectionRefusedError:
