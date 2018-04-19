@@ -39,10 +39,19 @@ def one_democratic_controller(game_state):
 
     return [democratic_game_state]
 
+
+def time_mux_controller(rate):
+    def mapper(game_state):
+        controller_index = int(time.time() * rate) % len(game_state)
+        return [game_state[controller_index]]
+    return mapper
+
+
 def usage():
-    print(f"Usage: {sys.argv[0]} [--democracy] REMOTE_HOST...")
-    print("   REMOTE_HOST   One or more addresses to send inputs to")
-    print("   --democracy   Map all controllers into one. At least two inputs are required to activate.")
+    print(f"Usage: {sys.argv[0]} [--democracy|--time-mux RATE] REMOTE_HOST...")
+    print("   REMOTE_HOST       One or more addresses to send inputs to")
+    print("   --democracy       Map all controllers into one. At least two inputs are required to activate.")
+    print("   --time-mux RATE   Multiplex all controllers into one, changing it RATE times per second")
     sys.exit(0)
 
 game_state_mapper = all_controllers_are_separate
@@ -55,10 +64,17 @@ if args[0] == "--democracy":
     print("Using democracy mode")
     game_state_mapper = one_democratic_controller
     args = args[1:]
+elif len(args) >= 2 and args[0] == "--time-mux":
+    print("Using time-basec multiplexing")
+    try:
+        rate = float(args[1])
+    except ValueError:
+        print("RATE is not a number, got", rate)
+    game_state_mapper = time_mux_controller(rate)
+    args = args[2:]
 
 if len(args) == 0:
     usage()
-
 
 hosts = args
 socks = []
@@ -110,15 +126,18 @@ for gamepad in enumerate(devices.gamepads):
     print(f"{gamepad_id}. {gamepad_device}")
     GamepadReader(event_queue, gamepad).start()
 
-
 while True:
+    force_resend = False
     try:
-        gid, events = event_queue.get()
+        gid, events = event_queue.get(block=True, timeout=0.05)
     except KeyboardInterrupt:
         sys.exit(0)
+    except queue.Empty:
+        force_resend = True
+        events = []
 
     for event in events:
-        game_state_changed = True
+        force_resend = True
         # PS1/2 gamepad with usb adapter
         if event.code == "ABS_X":
             if event.state < 127:
@@ -154,9 +173,9 @@ while True:
        
         else:
             # print(gid, event.code, event.state)
-            game_state_changed = False
+            force_resend = False
 
-    if game_state_changed:
+    if force_resend:
         sent_game_state = game_state_mapper(game_state)
         # print(sent_game_state)
         game_state_payload = ""
@@ -181,13 +200,13 @@ while True:
                 key_vector[7] = "1"
             game_state_payload += "".join(key_vector)
 
-        encoded_payload = game_state_payload.encode("ascii")
-        print(encoded_payload)
-        try:
-            # TODO: Add multicast / broadcast support
-            for sock in socks:
-                sock.send(encoded_payload)
-        except ConnectionRefusedError:
-            # Keep retrying
-            pass
-        game_state_changed = False
+            encoded_payload = game_state_payload.encode("ascii")
+            print(encoded_payload)
+            try:
+                # TODO: Add multicast / broadcast support
+                for sock in socks:
+                    sock.send(encoded_payload)
+            except ConnectionRefusedError:
+                # Keep retrying
+                pass
+            force_resend = False
