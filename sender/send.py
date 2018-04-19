@@ -8,11 +8,59 @@ import sys
 import threading
 
 
-hosts = sys.argv[1:]
-if len(hosts) == 0:
-    print(f"Usage: {sys.argv[0]} REMOTE_HOST...")
+def all_controllers_are_separate(game_state):
+    return game_state
+
+
+def one_democratic_controller(game_state):
+    democratic_game_state = {
+        "X": 0,
+        "Y": 0,
+        "1": 0,
+        "2": 0,
+        "3": 0,
+        "4": 0,
+    }
+
+    # Sum inputs
+    for controller in game_state:
+        for channel, value in controller.items():
+            democratic_game_state[channel] += value
+    # print("game state sum:", democratic_game_state)
+
+    # Filter inputs with only one supporter
+    for channel, value in democratic_game_state.items():
+        if value < -1:
+            democratic_game_state[channel] = -1
+        elif value > 1:
+            democratic_game_state[channel] = 1
+        else:
+            democratic_game_state[channel] = 0
+
+    return [democratic_game_state]
+
+def usage():
+    print(f"Usage: {sys.argv[0]} [--democracy] REMOTE_HOST...")
+    print("   REMOTE_HOST   One or more addresses to send inputs to")
+    print("   --democracy   Map all controllers into one. At least two inputs are required to activate.")
     sys.exit(0)
 
+game_state_mapper = all_controllers_are_separate
+
+args = sys.argv[1:]
+if len(args) == 0:
+    usage()
+
+if args[0] == "--democracy":
+    print("Using democracy mode")
+    game_state_mapper = one_democratic_controller
+    args = args[1:]
+
+if len(args) == 0:
+    usage()
+
+
+hosts = args
 socks = []
 for host in hosts:
     try:
@@ -48,6 +96,7 @@ game_state = []
 game_state_changed = False
 
 event_queue = queue.Queue()
+print("Using the following game controllers:")
 for gamepad in enumerate(devices.gamepads):
     gamepad_id, gamepad_device = gamepad
     game_state.append({
@@ -108,8 +157,10 @@ while True:
             game_state_changed = False
 
     if game_state_changed:
+        sent_game_state = game_state_mapper(game_state)
+        # print(sent_game_state)
         game_state_payload = ""
-        for controller in game_state:
+        for controller in sent_game_state:
             key_vector = list("00000000")
             #                  UDLRABCD
             if controller["Y"] < 0:
@@ -129,14 +180,14 @@ while True:
             if controller["4"] == 1:
                 key_vector[7] = "1"
             game_state_payload += "".join(key_vector)
-        try:
-            encoded_payload = game_state_payload.encode("ascii")
 
+        encoded_payload = game_state_payload.encode("ascii")
+        print(encoded_payload)
+        try:
             # TODO: Add multicast / broadcast support
             for sock in socks:
                 sock.send(encoded_payload)
         except ConnectionRefusedError:
             # Keep retrying
             pass
-
         game_state_changed = False
