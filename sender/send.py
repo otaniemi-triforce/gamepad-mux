@@ -8,36 +8,53 @@ import sys
 import threading
 
 
-def all_controllers_are_separate(game_state):
-    return game_state
+def all_controllers_are_separate(separate_game_state):
+    return separate_game_state
 
 
-def one_democratic_controller(game_state):
-    democratic_game_state = {
-        "X": 0,
-        "Y": 0,
-        "1": 0,
-        "2": 0,
-        "3": 0,
-        "4": 0,
-    }
+def one_democratic_controller(number_of_virtual_controllers):
 
-    # Sum inputs
-    for controller in game_state:
-        for channel, value in controller.items():
-            democratic_game_state[channel] += value
-    # print("game state sum:", democratic_game_state)
+    def mapper(full_game_state):
 
-    # Filter inputs with only one supporter
-    for channel, value in democratic_game_state.items():
-        if value < -1:
-            democratic_game_state[channel] = -1
-        elif value > 1:
-            democratic_game_state[channel] = 1
-        else:
-            democratic_game_state[channel] = 0
+        democratic_game_state = []
+        for i in range(number_of_virtual_controllers):
+            democratic_game_state.append({
+                "X": 0,
+                "Y": 0,
+                "1": 0,
+                "2": 0,
+                "3": 0,
+                "4": 0,
+            })
+        number_of_real_controllers = len(full_game_state)
 
-    return [democratic_game_state]
+        # print("FULL", full_game_state)
+        # print("DEMO", democratic_game_state)
+        controller_ratio = number_of_real_controllers // number_of_virtual_controllers
+        # Sum inputs
+        for controller_number, controller in enumerate(full_game_state): 
+            demoratic_controller_index = controller_number // controller_ratio
+            if demoratic_controller_index >= number_of_virtual_controllers:
+                continue
+            # print(controller_number, demoratic_controller_index, controller)
+            for channel, value in controller.items():
+                # print(channel, value)
+                democratic_game_state[demoratic_controller_index][channel] += value
+        # print("game state sum:", democratic_game_state)
+
+        # Filter inputs with only one supporter
+        for controller in democratic_game_state:
+            for channel, value in controller.items():
+                if value < -1:
+                    controller[channel] = -1
+                elif value > 1:
+                    controller[channel] = 1
+                else:
+                    controller[channel] = 0
+
+        return democratic_game_state
+
+    return mapper
 
 
 def time_mux_controller(rate):
@@ -49,9 +66,9 @@ def time_mux_controller(rate):
 
 def usage():
     print("Usage: {} [--democracy|--time-mux RATE] REMOTE_HOST...".format(sys.argv[0]))
-    print("   REMOTE_HOST       One or more addresses to send inputs to")
-    print("   --democracy       Map all controllers into one. At least two inputs are required to activate.")
-    print("   --time-mux RATE   Multiplex all controllers into one, changing it RATE times per second")
+    print("   REMOTE_HOST         One or more addresses to send inputs to")
+    print("   --democracy NUMBER  Map NUMBER controllers into one. At least two inputs are required to activate.")
+    print("   --time-mux RATE     Multiplex all controllers into one, changing it RATE times per second")
     sys.exit(0)
 
 game_state_mapper = all_controllers_are_separate
@@ -62,14 +79,21 @@ if len(args) == 0:
 
 if args[0] == "--democracy":
     print("Using democracy mode")
-    game_state_mapper = one_democratic_controller
-    args = args[1:]
+    try:
+        rate = int(args[1])
+    except ValueError:
+        print("NUMBER is not a number, got", rate)
+        usage()
+    game_state_mapper = one_democratic_controller(rate)
+    args = args[2:]
+
 elif len(args) >= 2 and args[0] == "--time-mux":
     print("Using time-basec multiplexing")
     try:
         rate = float(args[1])
     except ValueError:
         print("RATE is not a number, got", rate)
+        usage()
     game_state_mapper = time_mux_controller(rate)
     args = args[2:]
 
@@ -179,7 +203,9 @@ while True:
         sent_game_state = game_state_mapper(game_state)
         # print(sent_game_state)
         game_state_payload = ""
+        # print("F", sent_game_state)
         for controller in sent_game_state:
+            # print("C", controller)
             key_vector = list("00000000")
             #                  UDLRABCD
             if controller["Y"] < 0:
@@ -200,13 +226,13 @@ while True:
                 key_vector[7] = "1"
             game_state_payload += "".join(key_vector)
 
-            encoded_payload = game_state_payload.encode("ascii")
-            print(encoded_payload)
-            try:
-                # TODO: Add multicast / broadcast support
-                for sock in socks:
-                    sock.send(encoded_payload)
-            except ConnectionRefusedError:
-                # Keep retrying
-                pass
-            force_resend = False
+        encoded_payload = game_state_payload.encode("ascii")
+        print(encoded_payload)
+        try:
+            # TODO: Add multicast / broadcast support
+            for sock in socks:
+                sock.send(encoded_payload)
+        except ConnectionRefusedError:
+            # Keep retrying
+            pass
+        force_resend = False
