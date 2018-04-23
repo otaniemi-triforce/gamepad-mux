@@ -48,7 +48,7 @@ def time_mux_controller(rate):
 
 
 def usage():
-    print(f"Usage: {sys.argv[0]} [--democracy|--time-mux RATE] REMOTE_HOST...")
+    print("Usage: {} [--democracy|--time-mux RATE] REMOTE_HOST...".format(sys.argv[0]))
     print("   REMOTE_HOST       One or more addresses to send inputs to")
     print("   --democracy       Map all controllers into one. At least two inputs are required to activate.")
     print("   --time-mux RATE   Multiplex all controllers into one, changing it RATE times per second")
@@ -85,7 +85,7 @@ for host in hosts:
         sock.connect((host, port))
 
     except socket.gaierror:
-        print(f"Host {host} not known")
+        print("Host {} not known".format(host))
         sys.exit(1)
     socks.append(sock)
 print("Sending keys to the following endpoints:", ", ".join(hosts))
@@ -123,7 +123,7 @@ for gamepad in enumerate(devices.gamepads):
         "3": 0,
         "4": 0,
     })
-    print(f"{gamepad_id}. {gamepad_device}")
+    print("{}. {}".format(gamepad_id, gamepad_device))
     GamepadReader(event_queue, gamepad).start()
 
 while True:
